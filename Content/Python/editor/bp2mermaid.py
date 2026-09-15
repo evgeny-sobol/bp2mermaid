@@ -28,6 +28,12 @@ _LEGACY_YAML_HEADER_RE = re.compile(r'\A---\r?\n.*?\r?\n---\r?\n*', re.DOTALL)
 _UE_STRUCT_REPR_RE = re.compile(r"<Struct '(?P<name>[^']+)'")
 _UE_STRUCT_PTR_RE = re.compile(r'\s*\(0x[0-9A-Fa-f]+\)')
 _TAG_NAME_RE = re.compile(r'TagName\s*=\s*"([^"]+)"')
+_AUTO_DESCRIPTION_RE = re.compile(r'AutoDescription\s*=\s*"((?:\\.|[^"\\])*)"', re.I)
+_INLINE_GAMEPLAY_TAGS_RE = re.compile(
+    r'(gameplay_tags:\s*)\(((?:\s*\(TagName="[^"]*"\),?)*)\s*\)',
+    re.I,
+)
+_PAREN_TAG_NAME_RE = re.compile(r'\(\s*TagName\s*=\s*"([^"]+)"\s*\)')
 KNOT_CLASSES = frozenset(('K2Node_Knot', 'K2Node_Reroute'))
 COMMENT_CLASSES = frozenset(('EdGraphNode_Comment',))
 EXEC_PIN_CATEGORIES = frozenset(('exec', 'pc_exec'))
@@ -118,6 +124,14 @@ COMPONENT_SKIP_PREFIXES = (
     'custom_depth', 'custom_primitive', 'ld_max_draw', 'min_draw',
     'cached_max_draw', 'runtime_virtual_texture',
 )
+# Short SCS instance names — skip before get_editor_property (exact basename).
+COMPONENT_DUMP_SKIP_BASENAMES = frozenset((
+    'mesh', 'arrow', 'text', 'timeline', 'capsule', 'collision',
+    'trigger', 'audio', 'camera', 'widget', 'niagara', 'decal', 'spline',
+    'light', 'billboard', 'shape', 'springarm', 'spring_arm',
+    'defaultsceneroot', 'default_scene_root', 'character_mesh',
+    'staticmesh', 'static_mesh', 'textrender', 'text_render',
+))
 # CDO GetComponentsByClass + dir() on these types AV'd UE 5.8 Export Project.
 COMPONENT_DUMP_SKIP_UNREAL_TYPES = (
     'SceneComponent',
@@ -244,6 +258,7 @@ def pretty_export_text(text):
     text = _SOFT_CLASS_WRAP_RE.sub(r'\1', text)
     text = _NSLOCTEXT_RE.sub(_keep_nsloctext_display, text)
     text = _compact_ue_struct_repr(text)
+    text = _PAREN_TAG_NAME_RE.sub(r'\1', text)
     text = _compact_gameplay_attribute_dumps(text)
     text = _FLOAT_TOKEN_RE.sub(lambda match: _shorten_float_token(match.group(1)), text)
     return _K2_PREFIX_RE.sub('', text)
@@ -269,17 +284,48 @@ def collect_gameplay_tag_names(value):
     return _TAG_NAME_RE.findall(text)
 
 
+def _is_single_gameplay_tag_struct(name):
+    if name in ('GameplayTag', 'FGameplayTag'):
+        return True
+    return (
+        name.endswith('GameplayTag')
+        and 'Query' not in name
+        and 'Container' not in name
+    )
+
+
+def _compact_inline_gameplay_tags_field(text):
+    """`gameplay_tags: ((TagName="A"),(TagName="B"))` → `gameplay_tags: (A, B)`."""
+
+    def _replace(match):
+        tags = _TAG_NAME_RE.findall(match.group(2) or '')
+        if not tags:
+            return match.group(0)
+        return '{}({})'.format(match.group(1), ', '.join(tags))
+
+    return _INLINE_GAMEPLAY_TAGS_RE.sub(_replace, text or '')
+
+
 def _format_parsed_ue_struct(name, body):
     tags = _TAG_NAME_RE.findall(body or '')
+    if 'TagQuery' in name:
+        auto = _AUTO_DESCRIPTION_RE.search(body or '')
+        if auto:
+            desc = auto.group(1).replace('\\"', '"').strip()
+            if desc:
+                return desc
+        if tags:
+            return ', '.join(tags)
     if 'TagContainer' in name:
         return ', '.join(tags)
-    if name in ('GameplayTag', 'FGameplayTag') or name.endswith('GameplayTag'):
+    if _is_single_gameplay_tag_struct(name):
         return tags[0] if tags else ''
     if 'GameplayEventData' in name:
         if not tags and 'TagName=' not in (body or ''):
             return 'GameplayEventData()'
     compact = re.sub(r'\s+', ' ', body or '').strip()
     compact = _UE_STRUCT_PTR_RE.sub('', compact)
+    compact = _compact_inline_gameplay_tags_field(compact)
     if not compact or compact in ('{}',):
         return '{}()'.format(name)
     return '{}({})'.format(name, compact)
@@ -1049,6 +1095,121 @@ def _looks_like_gas_subobject(value):
     return 'GameplayEffectComponent' in name or 'GameplayModifierInfo' in name
 
 
+def _ue_struct_type_name(value):
+    try:
+        text = str(value)
+    except Exception:
+        text = ''
+    match = _UE_STRUCT_REPR_RE.search(text or '')
+    if match:
+        return match.group('name')
+    return pretty_export_text(_gas_type_name(value) or '')
+
+
+def _read_struct_field(obj, name):
+    if obj is None:
+        return None
+    found, current = read_cdo_property(obj, name)
+    return current if found else None
+
+
+def format_gameplay_tag_query(value, depth=0):
+    """Offline helper only. Live format_export_value must not call this (TagQuery AV)."""
+    if value is None or depth > 4:
+        return ''
+    found, desc = read_cdo_property(value, 'AutoDescription')
+    if found:
+        text = pretty_export_text(str(desc or '')).strip().strip('"')
+        if text:
+            return text
+    found, user = read_cdo_property(value, 'UserDescription')
+    if found:
+        text = pretty_export_text(str(user or '')).strip().strip('"')
+        if text:
+            return text
+    found, dictionary = read_cdo_property(value, 'TagDictionary')
+    if found and dictionary not in (None, ''):
+        tags = collect_gameplay_tag_names(dictionary)
+        if not tags:
+            for item in _as_list(dictionary)[:32]:
+                tags.extend(collect_gameplay_tag_names(item))
+                formatted = format_export_value(item, depth + 1)
+                if formatted and formatted not in tags:
+                    tags.append(formatted)
+        tags = [tag for tag in tags if tag]
+        if tags:
+            return ', '.join(tags)
+    return ''
+
+
+def format_gameplay_tag_container_value(value, depth=0):
+    if value is None or depth > 4:
+        return ''
+    tags = collect_gameplay_tag_names(value)
+    if tags:
+        return ', '.join(tags)
+    found, inner = read_cdo_property(value, 'GameplayTags')
+    if found and inner is not None:
+        tags = collect_gameplay_tag_names(inner)
+        if tags:
+            return ', '.join(tags)
+        parts = []
+        for item in _as_list(inner)[:32]:
+            text = format_export_value(item, depth + 1)
+            if text:
+                parts.append(text)
+        if parts:
+            return ', '.join(parts)
+    return ''
+
+
+def format_gameplay_tag_requirements(value, depth=0):
+    if value is None or depth > 4:
+        return 'require_tags: {gameplay_tags: }, ignore_tags: {gameplay_tags: }, tag_query: {}'
+    require = format_gameplay_tag_container_value(
+        _read_struct_field(value, 'RequireTags'), depth + 1)
+    ignore = format_gameplay_tag_container_value(
+        _read_struct_field(value, 'IgnoreTags'), depth + 1)
+    query = format_gameplay_tag_query(
+        _read_struct_field(value, 'TagQuery'), depth + 1)
+    require_body = '({})'.format(require) if require else ''
+    ignore_body = '({})'.format(ignore) if ignore else ''
+    query_body = query if query else '{}'
+    return (
+        'require_tags: {{gameplay_tags: {0}}}, ignore_tags: {{gameplay_tags: {1}}}, '
+        'tag_query: {2}'
+    ).format(require_body, ignore_body, query_body)
+
+
+def format_mw_interruption_tags(value, depth=0):
+    my_tags = format_gameplay_tag_requirements(
+        _read_struct_field(value, 'MyTags'), depth + 1)
+    source_tags = format_gameplay_tag_requirements(
+        _read_struct_field(value, 'SourceTags'), depth + 1)
+    return 'MWInterruptionTags(my_tags: {{{}}}, source_tags: {{{}}})'.format(
+        my_tags, source_tags)
+
+
+def _struct_clipboard_text(value):
+    """UE Details copy uses ExportText. Nested get_editor_property AV'd TagQuery on 5.8."""
+    fn = getattr(value, 'export_text', None)
+    if not callable(fn):
+        return ''
+    try:
+        text = fn()
+    except Exception:
+        return ''
+    return str(text or '')
+
+
+def format_tag_bearing_struct(value, depth=0):
+    del depth
+    clip = _struct_clipboard_text(value)
+    if clip:
+        return pretty_export_text(clip)
+    return ''
+
+
 def format_gas_subobject(value, depth=0):
     """Expand a GE component / modifier instead of dumping its UObject path."""
     type_name = pretty_export_text(_gas_type_name(value))
@@ -1086,6 +1247,9 @@ def format_export_value(value, depth=0):
     if isinstance(value, str):
         return pretty_export_text(value)
     if _looks_like_ue_struct(value):
+        expanded = format_tag_bearing_struct(value, depth)
+        if expanded:
+            return expanded
         return pretty_export_text(str(value))
     if _looks_like_gas_subobject(value):
         return format_gas_subobject(value, depth)
@@ -2363,6 +2527,9 @@ def build_class_default_rows(names, cdo, variable_meta=None):
         key = base.lower()
         if key in seen:
             continue
+        if should_skip_component_member_name(name):
+            continue
+        _log('Export All: class-defaults-probe {}'.format(base))
         found, current = read_cdo_property(cdo, base)
         if not found:
             stored = meta.get(base) or meta.get(name)
@@ -2423,6 +2590,33 @@ def collect_class_defaults(blueprint):
     return build_class_default_rows(names, cdo, meta)
 
 
+def should_skip_component_member_name(name):
+    """True when the CDO member name is an Engine component we must not retrieve."""
+    base = member_variable_basename(name)
+    if not base:
+        return True
+    haystack = '{} {}'.format(name, base).replace('\\', '/')
+    lower = haystack.lower()
+    snake = _to_snake_property_name(base)
+    if snake in COMPONENT_DUMP_SKIP_BASENAMES or base.lower() in COMPONENT_DUMP_SKIP_BASENAMES:
+        return True
+    if 'timeline' in lower or 'timeline' in snake:
+        return True
+    for marker in COMPONENT_DUMP_SKIP_CLASS_MARKERS:
+        token = str(marker or '').lower()
+        if token and token in lower:
+            return True
+    return False
+
+
+def is_component_export_member_name(name):
+    """True only for custom *Component slots — not delegates, floats, class refs."""
+    if should_skip_component_member_name(name):
+        return False
+    base = member_variable_basename(name)
+    return 'component' in base.lower()
+
+
 def _looks_like_actor_component(value):
     if value is None or isinstance(value, (str, bytes, bytearray, bool, int, float)):
         return False
@@ -2462,16 +2656,10 @@ def should_skip_component_dump(comp):
     """True for Engine Scene/Movement/Timeline — dir() on those AV'd UE 5.8."""
     if comp is None:
         return True
-    if unreal is not None:
-        for type_name in COMPONENT_DUMP_SKIP_UNREAL_TYPES:
-            cls = getattr(unreal, type_name, None)
-            if cls is None:
-                continue
-            try:
-                if isinstance(comp, cls):
-                    return True
-            except Exception:
-                pass
+    instance = _component_instance_name(comp) or ''
+    class_name = _data_asset_class_name(comp) or _gas_type_name(comp) or ''
+    if should_skip_component_member_name(instance) or should_skip_component_member_name(class_name):
+        return True
     path = ''
     get_class = getattr(comp, 'get_class', None)
     if callable(get_class):
@@ -2485,12 +2673,20 @@ def should_skip_component_dump(comp):
     lower_path = path.replace('\\', '/').lower()
     if '/script/engine.' in lower_path or '/script/engine/' in lower_path:
         return True
-    class_name = _data_asset_class_name(comp) or _gas_type_name(comp) or ''
-    instance = _component_instance_name(comp) or ''
     haystack = '{} {}'.format(class_name, instance)
     for marker in COMPONENT_DUMP_SKIP_CLASS_MARKERS:
         if marker in haystack:
             return True
+    if unreal is not None:
+        for type_name in COMPONENT_DUMP_SKIP_UNREAL_TYPES:
+            cls = getattr(unreal, type_name, None)
+            if cls is None:
+                continue
+            try:
+                if isinstance(comp, cls):
+                    return True
+            except Exception:
+                pass
     return False
 
 
@@ -2524,6 +2720,12 @@ def _iter_blueprint_component_objects(blueprint):
     cdo = _cdo_of_class(generated)
     if cdo is not None:
         for name in _list_member_variable_names(blueprint, include_inherited=True):
+            if not keep_class_default_member(name):
+                continue
+            if not is_component_export_member_name(name):
+                continue
+            _log('Export All: components-cdo-probe {}'.format(
+                member_variable_basename(name)))
             found_prop, value = read_cdo_property(cdo, name)
             if found_prop:
                 add(value)
@@ -2777,7 +2979,9 @@ def export_all(blueprint, out_dir=None, notify=True, copy_clipboard=None,
     _log('Export All: class {}'.format(asset_name))
     kept = meaningful_dumps(dumps)
     class_settings = collect_class_settings(blueprint)
+    _log('Export All: class-settings-done {}'.format(asset_name))
     class_defaults = collect_class_defaults(blueprint)
+    _log('Export All: class-defaults-done {}'.format(asset_name))
     _log('Export All: components {}'.format(asset_name))
     components = collect_blueprint_components(blueprint)
     if not kept:
