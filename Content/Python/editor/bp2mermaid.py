@@ -16,7 +16,7 @@ EXPORT_SUBDIR = os.path.join('Source', 'BPMermaids')
 AUTO_EXPORT_STATE_FILENAME = 'auto_export.json'
 AUTO_EXPORT_DEBOUNCE_SEC = 2.0
 AUTO_EXPORT_POLL_SEC = 0.35
-_HOOKS_ATTR = '_mw_export_blueprint_graph_hooks'
+_HOOKS_ATTR = '_bp2mermaid_hooks'
 _UE_CONTENT_PATH_RE = re.compile(r'/(?:Game|Engine)(?:/[\w]+)+(?:\.\w+)?')
 _SOFT_CLASS_WRAP_RE = re.compile(r"[A-Za-z_][\w.]*'(…/[^']*)'")
 _K2_PREFIX_RE = re.compile(r'\bK2Node_')
@@ -56,8 +56,12 @@ ROOT_NODE_CLASSES = frozenset((
 ))
 _MERMAID_NODE_LABEL_RE = re.compile(r'^\s+n\d+\["(.*)"\]\s*$', re.MULTILINE)
 _MERMAID_FENCE_RE = re.compile(r'```mermaid\s*\n(.*?)```', re.DOTALL)
+_JSON_FENCE_RE = re.compile(r'```json\s*\n(.*?)```', re.DOTALL)
 _MERMAID_EDGE_RE = re.compile(r'-->|-.->')
 TRIVIAL_SKIP_SUFFIX = '.skip'
+# Bump when the collector changes so stale `{Asset}.md.skip` from empty-Nodes
+# scans (UE 5.8 graph-editor removal) do not hide real EventGraphs.
+TRIVIAL_SKIP_GENERATION = '2'
 CLASS_DEFAULTS_MAX_ROWS = 120
 CDO_SKIP_NAMES = frozenset((
     'actor_guid', 'actor_instance_guid', 'actor_label', 'asset_user_data',
@@ -88,6 +92,138 @@ _SKIP_INHERITED_MEMBER_MARKERS = (
     'engine.scenecomponent:',
     'engine.animinstance:',
 )
+GAS_EXPORT_PREFIXES = ('GA_', 'GE_')
+DATA_ASSET_EXPORT_PREFIXES = ('DA_',)
+DATA_ASSET_SKIP_NAMES = frozenset((
+    'asset_import_data', 'thumbnail_info', 'asset_bundle_data',
+    'package_metadata', 'simple_construction_script',
+    'ubergraph_pages', 'function_graphs', 'macro_graphs',
+    'delegate_signature_graphs', 'new_variables',
+))
+COMPONENT_SKIP_NAMES = frozenset((
+    'mobility', 'creation_method', 'ucs_serialization_index',
+    'replicates', 'auto_activate', 'is_editor_only',
+    'editable_when_inherited', 'can_ever_affect_navigation',
+    'is_active', 'physics_volume', 'body_instance',
+    'component_velocity', 'bounds_scale', 'detail_mode',
+    'component_tags', 'should_update_physics_volume',
+    'visible', 'hidden_in_game', 'selectable',
+    'use_attach_parent_bound', 'net_addressable_name',
+))
+COMPONENT_SKIP_PREFIXES = (
+    'relative_', 'attach_', 'b_absolute_', 'b_should_snap_',
+    'b_visible', 'b_hidden', 'b_render_', 'b_cast_', 'b_light_',
+    'b_receive_', 'b_self_shadow', 'primary_component_tick',
+    'virtual_texture', 'ray_tracing', 'translucency_sort',
+    'custom_depth', 'custom_primitive', 'ld_max_draw', 'min_draw',
+    'cached_max_draw', 'runtime_virtual_texture',
+)
+# CDO GetComponentsByClass + dir() on these types AV'd UE 5.8 Export Project.
+COMPONENT_DUMP_SKIP_UNREAL_TYPES = (
+    'SceneComponent',
+    'MovementComponent',
+    'TimelineComponent',
+)
+COMPONENT_DUMP_SKIP_CLASS_MARKERS = (
+    'SceneComponent',
+    'PrimitiveComponent',
+    'MeshComponent',
+    'SkinnedMesh',
+    'SkeletalMesh',
+    'StaticMeshComponent',
+    'CapsuleComponent',
+    'SphereComponent',
+    'BoxComponent',
+    'MovementComponent',
+    'CharacterMovement',
+    'SpringArm',
+    'CameraComponent',
+    'WidgetComponent',
+    'NiagaraComponent',
+    'AudioComponent',
+    'LightComponent',
+    'ShapeComponent',
+    'ArrowComponent',
+    'BillboardComponent',
+    'ParticleSystem',
+    'ChildActorComponent',
+    'SplineComponent',
+    'DecalComponent',
+    'TextRenderComponent',
+    'PoseableMesh',
+    'AbilitySystemComponent',
+    'TimelineComponent',
+    'InputComponent',
+    'Cloth',
+    'Chaos',
+)
+_JSON_OMIT = object()
+_EXPORT_ASSET_CLASSES = (
+    ('/Script/Engine', 'Blueprint'),
+    ('/Script/GameplayAbilities', 'GameplayAbilityBlueprint'),
+)
+GAS_CDO_EXTRA_BASES = (
+    'GEComponents',
+    'DurationPolicy',
+    'DurationMagnitude',
+    'Period',
+    'StackingType',
+    'StackLimitCount',
+    'Modifiers',
+    'Executions',
+    'GameplayCues',
+    'InheritableGameplayEffectTags',
+    'InheritableOwnedTagsContainer',
+    'OngoingTagRequirements',
+    'ApplicationTagRequirements',
+    'RemovalTagRequirements',
+    'RemoveGameplayEffectsWithTags',
+    'GrantedApplicationImmunityTags',
+    'AbilityTags',
+    'AssetTags',
+    'ActivationOwnedTags',
+    'ActivationRequiredTags',
+    'ActivationBlockedTags',
+    'SourceRequiredTags',
+    'SourceBlockedTags',
+    'TargetRequiredTags',
+    'TargetBlockedTags',
+    'CancelAbilitiesWithTag',
+    'BlockAbilitiesWithTag',
+    'ActivationPolicy',
+    'NetExecutionPolicy',
+    'InstancingPolicy',
+    'CostGameplayEffectClass',
+    'CooldownGameplayEffectClass',
+    'AbilityTriggers',
+)
+GAS_SUBOBJECT_PROP_BASES = (
+    'InheritableGrantedTags',
+    'bReplicateGrantedTags',
+    'InheritableAssetTags',
+    'InheritableBlockedAbilityTagsContainer',
+    'GrantedApplicationImmunityTags',
+    'GrantedApplicationImmunityQuery',
+    'ApplicationTagRequirements',
+    'OngoingTagRequirements',
+    'RemovalTagRequirements',
+    'ApplicationRequirements',
+    'ChanceToApplyToTarget',
+    'OnApplicationGameplayEffects',
+    'OnCompleteAlways',
+    'OnCompletePrematurely',
+    'OnCompleteNormal',
+    'GrantAbilityConfigs',
+    'RemoveGameplayEffectQueries',
+    'Modifiers',
+    'ModifierMagnitude',
+    'Attribute',
+    'ModifierOp',
+)
+_SKIP_CONTENT_WALK_DIRS = frozenset((
+    '__externalactors__',
+    '__externalobjects__',
+))
 
 _RETAIN = []
 _LIST_MEMBERS_USES_FLAG = True
@@ -386,6 +522,383 @@ def combined_markdown_has_trivial_block(text):
     return any(mermaid_block_is_trivial(block) for block in blocks)
 
 
+def export_asset_stem(name):
+    """`/Game/Foo/GA_Bar.GA_Bar_C` / `GA_Bar.md` → `GA_Bar`."""
+    text = str(name or '').strip().replace('\\', '/')
+    if not text:
+        return ''
+    text = text.rsplit('/', 1)[-1]
+    if text.lower().endswith('.uasset') or text.lower().endswith('.umap'):
+        text = text.rsplit('.', 1)[0]
+    elif text.lower().endswith('.md'):
+        text = text[:-3]
+    if '.' in text:
+        text = text.rsplit('.', 1)[-1]
+    if text.endswith('_C') and len(text) > 2:
+        text = text[:-2]
+    return text
+
+
+def is_gas_export_name(name):
+    """True for Content assets whose stem is `GA_*` or `GE_*`."""
+    return export_asset_stem(name).startswith(GAS_EXPORT_PREFIXES)
+
+
+def is_data_asset_export_name(name):
+    """True for Content assets whose stem is `DA_*`."""
+    return export_asset_stem(name).startswith(DATA_ASSET_EXPORT_PREFIXES)
+
+
+def is_non_graph_export_name(name):
+    return is_gas_export_name(name) or is_data_asset_export_name(name)
+
+
+def class_rows_are_meaningful(rows):
+    for row in rows or []:
+        if str(row.get('name') or '').strip() and str(row.get('value') or '').strip():
+            return True
+    return False
+
+
+def keep_gas_class_only_export(asset_name, class_settings=None, class_defaults=None):
+    """GA_/GE_ keep a markdown file when Class Settings/Defaults have values, even with no graphs."""
+    return is_gas_export_name(asset_name) and (
+        class_rows_are_meaningful(class_settings)
+        or class_rows_are_meaningful(class_defaults)
+    )
+
+
+def keep_class_only_export(asset_name, class_settings=None, class_defaults=None,
+                           components=None):
+    """Keep `{Asset}.md` when Class Defaults / components exist (not mermaid-trivial skip)."""
+    if keep_gas_class_only_export(asset_name, class_settings, class_defaults):
+        return True
+    if class_rows_are_meaningful(class_defaults):
+        return True
+    if components:
+        return True
+    return False
+
+
+def markdown_has_class_content(text):
+    """True when a Class Settings/Defaults list row is present (not `_(none)_`)."""
+    if not text:
+        return False
+    return bool(re.search(r'^- \*\*[^*]+?\*\*', str(text), re.M))
+
+
+def existing_gas_export_is_keepable(md_path, text=None):
+    if not is_gas_export_name(os.path.basename(md_path or '')):
+        return False
+    body = text
+    if body is None:
+        if not md_path or not os.path.isfile(md_path):
+            return False
+        try:
+            with open(md_path, encoding='utf-8') as handle:
+                body = handle.read()
+        except Exception:
+            return False
+    return markdown_has_class_content(body)
+
+
+def markdown_has_json_content(text):
+    """True when a ```json fence has a non-empty object/array."""
+    for block in _JSON_FENCE_RE.findall(str(text or '')):
+        stripped = block.strip()
+        if stripped and stripped not in ('{}', '[]', 'null'):
+            return True
+    return False
+
+
+def existing_da_export_is_keepable(md_path, text=None):
+    if not is_data_asset_export_name(os.path.basename(md_path or '')):
+        return False
+    body = text
+    if body is None:
+        if not md_path or not os.path.isfile(md_path):
+            return False
+        try:
+            with open(md_path, encoding='utf-8') as handle:
+                body = handle.read()
+        except Exception:
+            return False
+    return markdown_has_json_content(body)
+
+
+def existing_class_export_is_keepable(md_path, text=None):
+    body = text
+    if body is None:
+        if not md_path or not os.path.isfile(md_path):
+            return False
+        try:
+            with open(md_path, encoding='utf-8') as handle:
+                body = handle.read()
+        except Exception:
+            return False
+    return markdown_has_class_content(body)
+
+
+def existing_non_graph_export_is_keepable(md_path, text=None):
+    return (
+        existing_gas_export_is_keepable(md_path, text)
+        or existing_da_export_is_keepable(md_path, text)
+        or existing_class_export_is_keepable(md_path, text)
+    )
+
+
+def _json_number(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    text = _shorten_float_token(str(value))
+    if '.' in text:
+        return float(text)
+    return int(text)
+
+
+def _json_key(name):
+    return display_member_variable_name(name) or str(name or '')
+
+
+def _is_uobject_like(value):
+    return callable(getattr(value, 'get_path_name', None)) or callable(
+        getattr(value, 'get_editor_property', None))
+
+
+def _uobject_is_inner(value, parent):
+    if parent is None:
+        return False
+    get_outer = getattr(value, 'get_outer', None)
+    if not callable(get_outer):
+        return False
+    try:
+        outer = get_outer()
+    except Exception:
+        return False
+    if outer is parent:
+        return True
+    try:
+        return outer == parent
+    except Exception:
+        return False
+
+
+def ue_value_to_jsonable(value, depth=0, parent=None):
+    """Convert a UE/Python value to JSON-friendly data. `_JSON_OMIT` means skip the key."""
+    if value is _JSON_OMIT or value is None or depth > 5:
+        return _JSON_OMIT
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return _json_number(value)
+    if isinstance(value, (bytes, bytearray)):
+        return _JSON_OMIT
+    if isinstance(value, str):
+        if _looks_like_ue_struct(value) or "<Struct '" in value:
+            tags = collect_gameplay_tag_names(value)
+            if tags:
+                name = ''
+                match = _UE_STRUCT_REPR_RE.search(value)
+                if match:
+                    name = match.group('name')
+                if 'TagContainer' in name or len(tags) > 1:
+                    return tags
+                return tags[0]
+            text = pretty_export_text(value)
+            return text if text else _JSON_OMIT
+        text = pretty_export_text(value)
+        return text if text else _JSON_OMIT
+    if _looks_like_ue_struct(value):
+        return ue_value_to_jsonable(str(value), depth=depth, parent=parent)
+    if isinstance(value, dict):
+        out = {}
+        for key, item in list(value.items())[:32]:
+            converted = ue_value_to_jsonable(item, depth=depth + 1, parent=parent)
+            if converted is _JSON_OMIT:
+                continue
+            label = pretty_export_text(str(key)) or str(key)
+            out[label] = converted
+        return out if out else _JSON_OMIT
+    if isinstance(value, (list, tuple, set, frozenset)):
+        parts = []
+        for item in list(value)[:32]:
+            converted = ue_value_to_jsonable(item, depth=depth + 1, parent=parent)
+            if converted is not _JSON_OMIT:
+                parts.append(converted)
+        return parts
+    if unreal is not None:
+        array_cls = getattr(unreal, 'Array', None)
+        if array_cls is not None:
+            try:
+                if isinstance(value, array_cls):
+                    return ue_value_to_jsonable(_as_list(value), depth=depth, parent=parent)
+            except Exception:
+                pass
+        map_cls = getattr(unreal, 'Map', None)
+        if map_cls is not None:
+            try:
+                if isinstance(value, map_cls):
+                    mapped = {}
+                    for key in value:
+                        mapped[key] = value[key]
+                    return ue_value_to_jsonable(mapped, depth=depth, parent=parent)
+            except Exception:
+                pass
+    if _looks_like_gas_subobject(value) or (
+            _is_uobject_like(value) and _uobject_is_inner(value, parent)):
+        nested = collect_data_asset_json(value, depth=depth + 1, parent=value)
+        type_name = pretty_export_text(_gas_type_name(value))
+        if nested:
+            if type_name:
+                nested = dict(nested)
+                nested['_Class'] = type_name
+            return nested
+        if type_name:
+            return type_name
+        return _JSON_OMIT
+    if _is_uobject_like(value):
+        get_path = getattr(value, 'get_path_name', None)
+        if callable(get_path):
+            try:
+                text = pretty_export_text(get_path())
+                return text if text else _JSON_OMIT
+            except Exception:
+                pass
+        text = pretty_export_text(_gas_type_name(value))
+        return text if text else _JSON_OMIT
+    text = pretty_export_text(str(value))
+    if text in ('None', 'none', 'null', ''):
+        return _JSON_OMIT
+    return text
+
+
+def skip_object_prop_name(name, skip_engine_component=False):
+    snake = _to_snake_property_name(name)
+    if snake in DATA_ASSET_SKIP_NAMES:
+        return True
+    if not skip_engine_component:
+        return False
+    if snake in COMPONENT_SKIP_NAMES:
+        return True
+    for prefix in COMPONENT_SKIP_PREFIXES:
+        if snake.startswith(prefix):
+            return True
+    return False
+
+
+def _wrapper_property_names(obj):
+    """Names from instance/class dicts. Never dir() a live UObject."""
+    names = []
+    seen = set()
+
+    def add(name):
+        if not name or name.startswith('_') or name in seen:
+            return
+        seen.add(name)
+        names.append(name)
+
+    try:
+        for name in vars(obj):
+            add(name)
+    except TypeError:
+        pass
+    try:
+        for cls in type(obj).__mro__:
+            if cls is object:
+                continue
+            try:
+                mapping = vars(cls)
+            except TypeError:
+                continue
+            for name, attr in mapping.items():
+                if callable(attr) and not isinstance(attr, property):
+                    continue
+                add(name)
+    except Exception:
+        pass
+    return names
+
+
+def list_data_asset_property_names(obj, skip_engine_component=False):
+    """Property names for a DataAsset / component dump. Not the Blueprint CDO hot path."""
+    names = []
+    seen = set()
+    if skip_engine_component:
+        raw = _wrapper_property_names(obj)
+    else:
+        try:
+            raw = dir(obj)
+        except Exception:
+            return names
+    for name in raw:
+        if not name or name.startswith('_'):
+            continue
+        if not keep_class_default_member(name):
+            continue
+        if skip_object_prop_name(name, skip_engine_component=skip_engine_component):
+            continue
+        type_attr = getattr(type(obj), name, None)
+        if callable(type_attr) and not isinstance(type_attr, property):
+            continue
+        key = (_to_snake_property_name(name) or name).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def collect_data_asset_json(obj, names=None, depth=0, parent=None,
+                            skip_engine_component=False):
+    """JSON-friendly dict of DataAsset / inner-object editor properties."""
+    if obj is None or depth > 5:
+        return {}
+    listed = names if names is not None else list_data_asset_property_names(
+        obj, skip_engine_component=skip_engine_component)
+    out = {}
+    owner = parent if parent is not None else obj
+    for name in listed:
+        if len(out) >= CLASS_DEFAULTS_MAX_ROWS:
+            break
+        if not keep_class_default_member(name):
+            continue
+        if skip_object_prop_name(name, skip_engine_component=skip_engine_component):
+            continue
+        found, value = read_cdo_property(obj, name)
+        if not found:
+            continue
+        converted = ue_value_to_jsonable(value, depth=depth + 1, parent=owner)
+        if converted is _JSON_OMIT:
+            continue
+        label = _json_key(name)
+        if not label:
+            continue
+        out[label] = converted
+    return out
+
+
+def assemble_data_asset_markdown(stem, data):
+    """`# DA_Foo` plus a json fence. `data` is already JSON-friendly."""
+    payload = json.dumps(data if data is not None else {}, indent=2, ensure_ascii=False)
+    return '# {}\n\n```json\n{}\n```\n'.format(stem or 'DA', payload)
+
+
+def write_data_asset_export_file(stem, data, out_dir, filename=None):
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+    if not filename:
+        filename = export_markdown_filename(stem)
+    md_path = os.path.join(out_dir, filename)
+    body = assemble_data_asset_markdown(stem, data)
+    with open(md_path, 'w', encoding='utf-8') as handle:
+        handle.write(body)
+        if body and not body.endswith('\n'):
+            handle.write('\n')
+    return md_path
+
+
 def mermaid_escape(text):
     if text is None:
         return ''
@@ -504,6 +1017,62 @@ def dumps_to_combined_markdown(dumps):
     return '\n'.join(parts)
 
 
+def _gas_type_name(value):
+    get_class = getattr(value, 'get_class', None)
+    if callable(get_class):
+        try:
+            cls = get_class()
+            name_fn = getattr(cls, 'get_name', None)
+            if callable(name_fn):
+                text = str(name_fn() or '')
+                if text:
+                    return text
+        except Exception:
+            pass
+    get_name = getattr(value, 'get_name', None)
+    if callable(get_name):
+        try:
+            text = str(get_name() or '')
+            if text:
+                return text
+        except Exception:
+            pass
+    return type(value).__name__
+
+
+def _looks_like_gas_subobject(value):
+    if value is None or isinstance(value, (str, bytes, bytearray, bool, int, float)):
+        return False
+    if not callable(getattr(value, 'get_editor_property', None)):
+        return False
+    name = _gas_type_name(value)
+    return 'GameplayEffectComponent' in name or 'GameplayModifierInfo' in name
+
+
+def format_gas_subobject(value, depth=0):
+    """Expand a GE component / modifier instead of dumping its UObject path."""
+    type_name = pretty_export_text(_gas_type_name(value))
+    if depth >= 4:
+        return type_name
+    parts = []
+    seen = set()
+    for base in GAS_SUBOBJECT_PROP_BASES:
+        key = member_variable_basename(base).lower()
+        if key in seen:
+            continue
+        found, current = read_cdo_property(value, base)
+        if not found:
+            continue
+        seen.add(key)
+        text = format_export_value(current, depth + 1)
+        if not text:
+            continue
+        parts.append('{}={}'.format(display_member_variable_name(base), text))
+    if not parts:
+        return type_name
+    return '{}({})'.format(type_name, ', '.join(parts))
+
+
 def format_export_value(value, depth=0):
     """LLM-facing string for a Class Settings / Class Defaults value."""
     if value is None or depth > 4:
@@ -518,6 +1087,8 @@ def format_export_value(value, depth=0):
         return pretty_export_text(value)
     if _looks_like_ue_struct(value):
         return pretty_export_text(str(value))
+    if _looks_like_gas_subobject(value):
+        return format_gas_subobject(value, depth)
     to_string = getattr(value, 'to_string', None)
     if callable(to_string):
         try:
@@ -585,13 +1156,65 @@ def format_class_section_markdown(title, rows):
     return '\n'.join(lines)
 
 
-def assemble_blueprint_markdown(dumps, class_settings=None, class_defaults=None):
-    """Class Settings + Class Defaults, then graph mermaid (EventGraph first)."""
+def _component_prop_cell(value):
+    if value is True:
+        return 'true'
+    if value is False:
+        return 'false'
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return pretty_export_text(str(value))
+    if isinstance(value, str):
+        return pretty_export_text(value)
+    if isinstance(value, list):
+        parts = [_component_prop_cell(item) for item in value]
+        return ', '.join(part for part in parts if part)
+    if isinstance(value, dict):
+        return pretty_export_text(json.dumps(value, ensure_ascii=False))
+    return pretty_export_text(str(value))
+
+
+def format_components_markdown(entries):
+    """`# Components` with one `## Name (Class)` block per component that has properties."""
+    if not entries:
+        return ''
+    lines = ['# Components', '']
+    for entry in entries:
+        name = pretty_export_text(entry.get('name') or 'Component')
+        cls = pretty_export_text(entry.get('class') or '')
+        if cls and cls not in (name,):
+            lines.append('## {} ({})'.format(name, cls))
+        else:
+            lines.append('## {}'.format(name))
+        lines.append('')
+        props = entry.get('props') or {}
+        if not props:
+            lines.append('_(none)_')
+            lines.append('')
+            continue
+        for key, value in props.items():
+            label = pretty_export_text(str(key))
+            if not label:
+                continue
+            cell = _component_prop_cell(value)
+            if cell:
+                lines.append('- **{}**: {}'.format(label, cell))
+            else:
+                lines.append('- **{}**'.format(label))
+        lines.append('')
+    return '\n'.join(lines)
+
+
+def assemble_blueprint_markdown(dumps, class_settings=None, class_defaults=None,
+                                components=None):
+    """Class Settings + Class Defaults + Components, then graph mermaid."""
     header = (
         format_class_section_markdown('Class Settings', class_settings or [])
         + '\n'
         + format_class_section_markdown('Class Defaults', class_defaults or [])
     )
+    component_block = format_components_markdown(components or [])
+    if component_block:
+        header = header + '\n' + component_block
     body = dumps_to_combined_markdown(dumps)
     if body:
         return header + '\n' + body
@@ -599,7 +1222,8 @@ def assemble_blueprint_markdown(dumps, class_settings=None, class_defaults=None)
 
 
 def write_combined_export_file(dumps, out_dir, stamp=None, filename=None,
-                               class_settings=None, class_defaults=None):
+                               class_settings=None, class_defaults=None,
+                               components=None):
     """Write `{Blueprint}.md` with class header + every graph. Returns md_path."""
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
@@ -610,7 +1234,8 @@ def write_combined_export_file(dumps, out_dir, stamp=None, filename=None,
         filename = export_markdown_filename(blueprint, stamp=stamp)
     md_path = os.path.join(out_dir, filename)
     body = assemble_blueprint_markdown(
-        dumps, class_settings=class_settings, class_defaults=class_defaults)
+        dumps, class_settings=class_settings, class_defaults=class_defaults,
+        components=components)
     with open(md_path, 'w', encoding='utf-8') as handle:
         handle.write(body)
         if body and not body.endswith('\n'):
@@ -699,7 +1324,14 @@ def trivial_skip_is_current(md_path, source_mtime):
     skip_path = trivial_skip_path(md_path)
     if source_mtime is None or not skip_path or not os.path.isfile(skip_path):
         return False
-    return _mtime_seconds(os.path.getmtime(skip_path)) == _mtime_seconds(source_mtime)
+    if _mtime_seconds(os.path.getmtime(skip_path)) != _mtime_seconds(source_mtime):
+        return False
+    try:
+        with open(skip_path, encoding='utf-8') as handle:
+            lines = [line.strip() for line in handle.read().splitlines() if line.strip()]
+    except Exception:
+        return False
+    return len(lines) >= 2 and lines[1] == TRIVIAL_SKIP_GENERATION
 
 
 def stamp_trivial_skip(md_path, source_mtime):
@@ -711,7 +1343,7 @@ def stamp_trivial_skip(md_path, source_mtime):
     if folder and not os.path.isdir(folder):
         os.makedirs(folder)
     with open(skip_path, 'w', encoding='utf-8') as handle:
-        handle.write('root-only\n')
+        handle.write('root-only\n{}\n'.format(TRIVIAL_SKIP_GENERATION))
     stamp_export_mtime(skip_path, source_mtime)
     return skip_path
 
@@ -1018,6 +1650,16 @@ def export_all_by_path(blueprint_path, out_dir=None, notify=True):
     return export_all(blueprint, out_dir=out_dir, notify=notify)
 
 
+class _AssetRef(object):
+    """Minimal AssetData stand-in for Content-walked GA_/GE_ packages."""
+
+    __slots__ = ('package_name', 'asset_name')
+
+    def __init__(self, package_name, asset_name):
+        self.package_name = package_name
+        self.asset_name = asset_name
+
+
 def _asset_package_name(asset):
     package = getattr(asset, 'package_name', None)
     if package:
@@ -1042,24 +1684,92 @@ def _is_exportable_game_blueprint(asset):
     return True
 
 
-def _list_game_blueprint_assets():
-    helpers = getattr(unreal, 'AssetRegistryHelpers', None)
-    if helpers is None or not hasattr(helpers, 'get_asset_registry'):
+def iter_content_prefixed_packages(prefixes, content_dir=None):
+    """`(package, stem)` for `Prefix*.uasset` under Content."""
+    prefixes = tuple(prefixes or ())
+    root = project_content_dir(content_dir)
+    found = []
+    if not prefixes or not os.path.isdir(root):
+        return found
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            name for name in dirnames
+            if name.lower() not in _SKIP_CONTENT_WALK_DIRS
+        ]
+        for filename in filenames:
+            lower = filename.lower()
+            if not lower.endswith('.uasset'):
+                continue
+            stem = filename[:-7]
+            if not export_asset_stem(stem).startswith(prefixes):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, filename), root)
+            rel = rel.replace('\\', '/')
+            if rel.endswith('.uasset'):
+                rel = rel[:-7]
+            found.append(('/Game/' + rel, stem))
+    found.sort(key=lambda item: item[0].lower())
+    return found
+
+
+def iter_content_gas_packages(content_dir=None):
+    """`(package, stem)` for every `GA_*.uasset` / `GE_*.uasset` under Content."""
+    return iter_content_prefixed_packages(GAS_EXPORT_PREFIXES, content_dir)
+
+
+def iter_content_da_packages(content_dir=None):
+    """`(package, stem)` for every `DA_*.uasset` under Content."""
+    return iter_content_prefixed_packages(DATA_ASSET_EXPORT_PREFIXES, content_dir)
+
+
+def _list_assets_by_class(registry, script, class_name):
+    if registry is None or unreal is None:
         return []
     try:
-        registry = helpers.get_asset_registry()
-        class_path = unreal.TopLevelAssetPath('/Script/Engine', 'Blueprint')
+        class_path = unreal.TopLevelAssetPath(script, class_name)
         try:
             assets = registry.get_assets_by_class(class_path, True)
         except TypeError:
             assets = registry.get_assets_by_class(class_path)
-    except Exception as error:
-        _log_error('Export Project: AssetRegistry failed: {}'.format(error))
+    except Exception:
         return []
+    return _as_list(assets)
+
+
+def _list_game_blueprint_assets():
     found = []
-    for asset in _as_list(assets):
-        if _is_exportable_game_blueprint(asset):
-            found.append(asset)
+    seen = set()
+
+    def _add(asset):
+        if not _is_exportable_game_blueprint(asset):
+            return
+        package = _asset_package_name(asset)
+        key = package.lower()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        found.append(asset)
+
+    helpers = getattr(unreal, 'AssetRegistryHelpers', None) if unreal is not None else None
+    registry = None
+    if helpers is not None and hasattr(helpers, 'get_asset_registry'):
+        try:
+            registry = helpers.get_asset_registry()
+        except Exception as error:
+            _log_error('Export Project: AssetRegistry failed: {}'.format(error))
+            registry = None
+    if registry is not None:
+        for script, class_name in _EXPORT_ASSET_CLASSES:
+            for asset in _list_assets_by_class(registry, script, class_name):
+                _add(asset)
+    for package, stem in iter_content_gas_packages():
+        if package.lower() in seen:
+            continue
+        _add(_AssetRef(package, stem))
+    for package, stem in iter_content_da_packages():
+        if package.lower() in seen:
+            continue
+        _add(_AssetRef(package, stem))
     found.sort(key=lambda item: _asset_package_name(item).lower())
     return found
 
@@ -1088,14 +1798,41 @@ def export_project(out_dir=None, notify=True):
         if not should_refresh_export(md_path, source_mtime):
             strip_legacy_yaml_header(md_path, source_mtime)
             if existing_export_is_trivial(md_path):
+                if existing_non_graph_export_is_keepable(md_path):
+                    clear_trivial_skip(md_path)
+                    return 'uptodate'
                 record_trivial_export(md_path, source_mtime, root)
                 return 'trivial'
             if not existing_export_has_trivial_block(md_path):
                 clear_trivial_skip(md_path)
                 return 'uptodate'
-        if trivial_skip_is_current(md_path, source_mtime):
-            return 'trivial'
         name = str(getattr(asset, 'asset_name', '') or package.rsplit('/', 1)[-1])
+        if trivial_skip_is_current(md_path, source_mtime):
+            if not is_non_graph_export_name(name) and not is_non_graph_export_name(
+                    os.path.basename(md_path)):
+                return 'trivial'
+        if is_data_asset_export_name(name) or is_data_asset_export_name(
+                os.path.basename(md_path)):
+            loaded = _load_any_asset(package) or _load_any_asset(
+                '{}.{}'.format(package, name))
+            if loaded is None:
+                failed.append(package or name)
+                return
+            result = export_data_asset(
+                loaded,
+                out_dir=root,
+                notify=False,
+                copy_clipboard=False,
+                package=package,
+            )
+            if result is None:
+                return 'skip'
+            if result.get('trivial'):
+                return 'trivial'
+            if result.get('skipped'):
+                return 'uptodate'
+            wrote.append(result.get('md'))
+            return 'ok'
         blueprint = _load_blueprint(package) or _load_blueprint('{}.{}'.format(package, name))
         if blueprint is None:
             failed.append(package or name)
@@ -1199,9 +1936,7 @@ def run_editor_selftest(notify=False):
     report = {'spike': spike_api(), 'exports': [], 'errors': []}
     blueprint = None
     graph_names = []
-    preferred = (
-        '/Game/MW/Editor/Tools/Utility/BP_MW_Techart_UtilityEditorFunctions.BP_MW_Techart_UtilityEditorFunctions',
-    )
+    preferred = ()
     for path in preferred:
         blueprint = _load_blueprint(path)
         if blueprint is not None:
@@ -1668,7 +2403,277 @@ def collect_class_defaults(blueprint):
             continue
         seen.add(key)
         names.append(name)
+    stem = ''
+    getter = getattr(blueprint, 'get_name', None)
+    if callable(getter):
+        try:
+            stem = getter()
+        except Exception:
+            stem = ''
+    if is_gas_export_name(stem):
+        for extra in GAS_CDO_EXTRA_BASES:
+            if not keep_class_default_member(extra):
+                continue
+            base = member_variable_basename(extra)
+            key = base.lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            names.append(extra)
     return build_class_default_rows(names, cdo, meta)
+
+
+def _looks_like_actor_component(value):
+    if value is None or isinstance(value, (str, bytes, bytearray, bool, int, float)):
+        return False
+    if unreal is not None:
+        class_cls = getattr(unreal, 'Class', None)
+        if class_cls is not None:
+            try:
+                if isinstance(value, class_cls):
+                    return False
+            except Exception:
+                pass
+        cls = getattr(unreal, 'ActorComponent', None)
+        if cls is not None:
+            try:
+                if isinstance(value, cls):
+                    return True
+            except Exception:
+                pass
+    if not callable(getattr(value, 'get_editor_property', None)):
+        return False
+    return 'Component' in _gas_type_name(value)
+
+
+def _component_instance_name(comp):
+    getter = getattr(comp, 'get_name', None)
+    if callable(getter):
+        try:
+            text = str(getter() or '')
+            if text:
+                return export_asset_stem(text) or text
+        except Exception:
+            pass
+    return _gas_type_name(comp)
+
+
+def should_skip_component_dump(comp):
+    """True for Engine Scene/Movement/Timeline — dir() on those AV'd UE 5.8."""
+    if comp is None:
+        return True
+    if unreal is not None:
+        for type_name in COMPONENT_DUMP_SKIP_UNREAL_TYPES:
+            cls = getattr(unreal, type_name, None)
+            if cls is None:
+                continue
+            try:
+                if isinstance(comp, cls):
+                    return True
+            except Exception:
+                pass
+    path = ''
+    get_class = getattr(comp, 'get_class', None)
+    if callable(get_class):
+        try:
+            cls = get_class()
+            get_path = getattr(cls, 'get_path_name', None)
+            if callable(get_path):
+                path = str(get_path() or '')
+        except Exception:
+            path = ''
+    lower_path = path.replace('\\', '/').lower()
+    if '/script/engine.' in lower_path or '/script/engine/' in lower_path:
+        return True
+    class_name = _data_asset_class_name(comp) or _gas_type_name(comp) or ''
+    instance = _component_instance_name(comp) or ''
+    haystack = '{} {}'.format(class_name, instance)
+    for marker in COMPONENT_DUMP_SKIP_CLASS_MARKERS:
+        if marker in haystack:
+            return True
+    return False
+
+
+def _iter_blueprint_component_objects(blueprint):
+    found = []
+    seen = set()
+
+    def add(comp):
+        if comp is None:
+            return
+        if should_skip_component_dump(comp):
+            return
+        if not _looks_like_actor_component(comp):
+            return
+        try:
+            name = _component_instance_name(comp)
+        except Exception:
+            name = ''
+        if name.startswith(('SKEL_', 'REINST_', 'TRASH_', 'DEAD_')):
+            return
+        try:
+            key = comp.get_path_name()
+        except Exception:
+            key = id(comp)
+        if key in seen:
+            return
+        seen.add(key)
+        found.append(comp)
+
+    generated = _generated_class(blueprint)
+    cdo = _cdo_of_class(generated)
+    if cdo is not None:
+        for name in _list_member_variable_names(blueprint, include_inherited=True):
+            found_prop, value = read_cdo_property(cdo, name)
+            if found_prop:
+                add(value)
+    # No construction-script node walk: that AV'd UE 5.8 on LevelButton
+    # after Class Defaults already read the same CDO members successfully.
+    _log('Export All: components-cdo-done n={}'.format(len(found)))
+    return found
+
+
+def collect_component_entries(components, property_names=None):
+    """Markdown-ready component dicts: name, class, props (engine noise skipped)."""
+    entries = []
+    for comp in components or []:
+        if comp is None or should_skip_component_dump(comp):
+            continue
+        _log('Export All: dump-component {}'.format(_component_instance_name(comp)))
+        props = collect_data_asset_json(
+            comp, names=property_names, skip_engine_component=True)
+        if not props:
+            continue
+        entries.append({
+            'name': _component_instance_name(comp),
+            'class': _data_asset_class_name(comp),
+            'props': props,
+        })
+    entries.sort(key=lambda item: str(item.get('name') or '').lower())
+    return entries[:64]
+
+
+def collect_blueprint_components(blueprint):
+    """CDO UPROPERTY actor components only. SCS walks AV'd UE 5.8 on LevelButton."""
+    try:
+        return collect_component_entries(_iter_blueprint_component_objects(blueprint))
+    except Exception as error:
+        label = '?'
+        getter = getattr(blueprint, 'get_name', None)
+        if callable(getter):
+            try:
+                label = getter() or label
+            except Exception:
+                pass
+        _log_error('Export All: components failed on {}: {}'.format(label, error))
+        return []
+
+
+def _data_asset_class_name(obj):
+    get_class = getattr(obj, 'get_class', None)
+    if callable(get_class):
+        try:
+            cls = get_class()
+            name_fn = getattr(cls, 'get_name', None)
+            if callable(name_fn):
+                text = pretty_export_text(name_fn())
+                if text:
+                    return text
+        except Exception:
+            pass
+    text = pretty_export_text(_gas_type_name(obj))
+    return text or ''
+
+
+def export_data_asset(obj, out_dir=None, notify=True, copy_clipboard=None,
+                      package=None):
+    """Dump a `DA_*` DataAsset (or its Blueprint CDO) to `{Asset}.md` JSON."""
+    if unreal is None:
+        raise RuntimeError('export_data_asset requires the Unreal editor')
+    if obj is None:
+        return None
+    if copy_clipboard is None:
+        copy_clipboard = notify
+    source = obj
+    stem = ''
+    getter = getattr(obj, 'get_name', None)
+    if callable(getter):
+        try:
+            stem = export_asset_stem(getter())
+        except Exception:
+            stem = ''
+    bp = _as_blueprint(obj)
+    if bp is not None:
+        stem = export_asset_stem(bp.get_name()) or stem
+        generated = _generated_class(bp)
+        cdo = _cdo_of_class(generated)
+        if cdo is not None:
+            source = cdo
+        if not package:
+            package = _package_path_from_blueprint(bp)
+    if not package:
+        package = _package_path_from_blueprint(obj)
+    root = out_dir or default_output_dir()
+    if package:
+        md_path = export_md_path(package, root)
+    else:
+        md_path = os.path.join(root, export_markdown_filename(stem or 'DA'))
+    source_mtime = package_source_mtime(package)
+    if not should_refresh_export(md_path, source_mtime):
+        strip_legacy_yaml_header(md_path, source_mtime)
+        if existing_da_export_is_keepable(md_path):
+            body = ''
+            if copy_clipboard and os.path.isfile(md_path):
+                try:
+                    with open(md_path, encoding='utf-8') as handle:
+                        body = handle.read()
+                    _copy_to_clipboard(body)
+                except Exception:
+                    body = ''
+            _log('Export DA: skip (mtime match) {}'.format(md_path))
+            if notify:
+                _notify(md_path, body or '(unchanged)')
+            clear_trivial_skip(md_path)
+            return {'md': md_path, 'data': {}, 'skipped': True}
+        if existing_export_is_trivial(md_path):
+            deleted = record_trivial_export(md_path, source_mtime, root)
+            return {
+                'md': md_path,
+                'data': {},
+                'skipped': True,
+                'trivial': True,
+                'deleted': deleted,
+            }
+    data = collect_data_asset_json(source)
+    class_name = _data_asset_class_name(source)
+    if class_name:
+        payload = {'_Class': class_name}
+        payload.update(data)
+        data = payload
+    target_dir = os.path.dirname(md_path) or root
+    if not data:
+        deleted = record_trivial_export(md_path, source_mtime, root)
+        _log('Export DA: no properties on {}'.format(stem or package))
+        if notify:
+            _notify_folder(None, 'No properties on {}.'.format(stem or package))
+        return {
+            'md': md_path,
+            'data': {},
+            'skipped': True,
+            'trivial': True,
+            'deleted': deleted,
+        }
+    clear_trivial_skip(md_path)
+    md_path = write_data_asset_export_file(
+        stem, data, target_dir, filename=os.path.basename(md_path))
+    stamp_export_mtime(md_path, source_mtime)
+    body = assemble_data_asset_markdown(stem, data)
+    if copy_clipboard:
+        _copy_to_clipboard(body)
+    _log('Export DA: module={} wrote {}'.format(__file__, md_path))
+    if notify:
+        _notify(md_path, body)
+    return {'md': md_path, 'data': data, 'skipped': False}
 
 
 def export_all(blueprint, out_dir=None, notify=True, copy_clipboard=None,
@@ -1679,25 +2684,25 @@ def export_all(blueprint, out_dir=None, notify=True, copy_clipboard=None,
     if copy_clipboard is None:
         copy_clipboard = notify
     names = ordered_graph_names(_list_graph_names(blueprint))
-    if not names:
-        _log_error('Export All: no graphs on {}'.format(blueprint.get_name()))
-        return None
     package = _package_path_from_blueprint(blueprint)
     root = out_dir or default_output_dir()
+    asset_name = blueprint.get_name()
     if filename:
         md_path = os.path.join(root, filename)
     elif package:
         md_path = export_md_path(package, root)
     else:
-        md_path = os.path.join(root, export_markdown_filename(blueprint.get_name()))
+        md_path = os.path.join(root, export_markdown_filename(asset_name))
     source_mtime = package_source_mtime(package)
-    if trivial_skip_is_current(md_path, source_mtime):
+    gas_named = is_gas_export_name(asset_name) or is_gas_export_name(
+        os.path.basename(md_path))
+    if trivial_skip_is_current(md_path, source_mtime) and not gas_named:
         _log('Export All: skip (root-only) {}'.format(md_path))
         if notify:
             _notify_folder(
                 None,
                 'No meaningful graphs on {} (root-only events/entries).'.format(
-                    blueprint.get_name()))
+                    asset_name))
         return {
             'md': md_path,
             'dumps': [],
@@ -1708,6 +2713,20 @@ def export_all(blueprint, out_dir=None, notify=True, copy_clipboard=None,
     if not should_refresh_export(md_path, source_mtime):
         strip_legacy_yaml_header(md_path, source_mtime)
         if existing_export_is_trivial(md_path):
+            if existing_non_graph_export_is_keepable(md_path):
+                body = ''
+                if copy_clipboard and os.path.isfile(md_path):
+                    try:
+                        with open(md_path, encoding='utf-8') as handle:
+                            body = handle.read()
+                        _copy_to_clipboard(body)
+                    except Exception:
+                        body = ''
+                _log('Export All: skip (mtime match) {}'.format(md_path))
+                if notify:
+                    _notify(md_path, body or '(unchanged)')
+                clear_trivial_skip(md_path)
+                return {'md': md_path, 'dumps': [], 'probes': [], 'skipped': True}
             deleted = record_trivial_export(md_path, source_mtime, root)
             _log('Export All: removed root-only {}'.format(md_path))
             if notify:
@@ -1737,15 +2756,17 @@ def export_all(blueprint, out_dir=None, notify=True, copy_clipboard=None,
             clear_trivial_skip(md_path)
             return {'md': md_path, 'dumps': [], 'probes': [], 'skipped': True}
         _log('Export All: rewrite to drop stub/pose graphs {}'.format(md_path))
+    _log('Export All: collecting {} ({} graphs)'.format(asset_name, len(names)))
     dumps = []
     probes = []
     target_dir = os.path.dirname(md_path) or root
     for name in names:
         if is_anim_pose_graph_name(name):
             continue
+        _log('Export All: graph {} / {}'.format(asset_name, name))
         graph = _find_graph(blueprint, name)
         if graph is None:
-            _log_error('Export All: graph {} not found on {}'.format(name, blueprint.get_name()))
+            _log_error('Export All: graph {} not found on {}'.format(name, asset_name))
             continue
         dump = collect_graph_dump(blueprint, graph)
         dumps.append(dump)
@@ -1753,49 +2774,44 @@ def export_all(blueprint, out_dir=None, notify=True, copy_clipboard=None,
             probe = _write_probe_if_empty(dump, target_dir)
             if probe:
                 probes.append(probe)
-    if not dumps:
-        deleted = record_trivial_export(md_path, source_mtime, root)
-        _log('Export All: no dumpable graphs on {}'.format(blueprint.get_name()))
-        if notify:
-            _notify_folder(
-                None,
-                'No meaningful graphs on {}.'.format(blueprint.get_name()))
-        return {
-            'md': md_path,
-            'dumps': [],
-            'probes': probes,
-            'skipped': True,
-            'trivial': True,
-            'deleted': deleted,
-        }
+    _log('Export All: class {}'.format(asset_name))
     kept = meaningful_dumps(dumps)
-    if not kept:
-        deleted = record_trivial_export(md_path, source_mtime, root)
-        _log('Export All: no meaningful graphs on {} ({} root-only)'.format(
-            blueprint.get_name(), len(dumps)))
-        if notify:
-            _notify_folder(
-                None,
-                'No meaningful graphs on {}.\nRoot-only graphs skipped: {}.'.format(
-                    blueprint.get_name(), len(dumps)))
-        return {
-            'md': md_path,
-            'dumps': [],
-            'probes': probes,
-            'skipped': True,
-            'trivial': True,
-            'deleted': deleted,
-        }
-    dumps = kept
-    clear_trivial_skip(md_path)
     class_settings = collect_class_settings(blueprint)
     class_defaults = collect_class_defaults(blueprint)
+    _log('Export All: components {}'.format(asset_name))
+    components = collect_blueprint_components(blueprint)
+    if not kept:
+        if keep_class_only_export(
+                asset_name, class_settings, class_defaults, components):
+            kept = []
+        else:
+            if not names:
+                _log_error('Export All: no graphs on {}'.format(asset_name))
+            deleted = record_trivial_export(md_path, source_mtime, root)
+            _log('Export All: no meaningful graphs on {} ({} dumpable)'.format(
+                asset_name, len(dumps)))
+            if notify:
+                _notify_folder(
+                    None,
+                    'No meaningful graphs on {}.'.format(asset_name))
+            return {
+                'md': md_path,
+                'dumps': [],
+                'probes': probes,
+                'skipped': True,
+                'trivial': True,
+                'deleted': deleted,
+            }
+    dumps = kept
+    clear_trivial_skip(md_path)
     md_path = write_combined_export_file(
         dumps, target_dir, filename=os.path.basename(md_path),
-        class_settings=class_settings, class_defaults=class_defaults)
+        class_settings=class_settings, class_defaults=class_defaults,
+        components=components)
     stamp_export_mtime(md_path, source_mtime)
     body = assemble_blueprint_markdown(
-        dumps, class_settings=class_settings, class_defaults=class_defaults)
+        dumps, class_settings=class_settings, class_defaults=class_defaults,
+        components=components)
     if copy_clipboard:
         _copy_to_clipboard(body)
     _log('Export All: module={} wrote {} ({} graphs)'.format(__file__, md_path, len(dumps)))
@@ -1829,6 +2845,33 @@ def auto_export_blueprint(blueprint):
         return export_all(blueprint, notify=False, copy_clipboard=False)
     except Exception as error:
         _log_error('Export All (auto) failed: {}'.format(error))
+        return None
+    finally:
+        hooks['exporting'] = False
+
+
+def auto_export_data_asset(obj):
+    """Silent DA_ JSON export used by the save hook."""
+    if unreal is None or obj is None:
+        return None
+    hooks = _hooks()
+    if hooks.get('exporting'):
+        return None
+    try:
+        path = obj.get_path_name()
+    except Exception:
+        path = str(obj)
+    now = time.time()
+    last = hooks.get('last_export_at', {}).get(path)
+    if last is not None and (now - last) < AUTO_EXPORT_DEBOUNCE_SEC:
+        return None
+    hooks.setdefault('last_export_at', {})[path] = now
+    hooks['exporting'] = True
+    try:
+        _log('Export DA (auto): {}'.format(getattr(obj, 'get_name', lambda: obj)()))
+        return export_data_asset(obj, notify=False, copy_clipboard=False)
+    except Exception as error:
+        _log_error('Export DA (auto) failed: {}'.format(error))
         return None
     finally:
         hooks['exporting'] = False
@@ -2108,21 +3151,22 @@ def _nodes_from_graph(blueprint, graph):
         'sample': [],
     }
     nodes = []
-    editor = _get_graph_editor(blueprint, graph)
-    if editor is not None:
-        info['editor'] = True
-        k2_cls = getattr(unreal, 'K2Node', None)
-        comment_cls = getattr(unreal, 'EdGraphNode_Comment', None)
-        listed = _invoke_out_array(editor, 'list_all_nodes', k2_cls)
-        comments = _invoke_out_array(editor, 'list_comment_nodes', comment_cls)
-        info['list_all_nodes'] = len(listed)
-        info['list_comment_nodes'] = len(comments)
-        info['sample'] = [_class_name(node) for node in (listed[:6] + comments[:2])]
-        nodes.extend(listed)
-        nodes.extend(comments)
     reflected = _as_list(_try_uproperty(graph, ('Nodes', 'nodes')))
     info['reflected_Nodes'] = len(reflected)
     nodes.extend(reflected)
+    if not nodes:
+        editor = _get_graph_editor(blueprint, graph)
+        if editor is not None:
+            info['editor'] = True
+            k2_cls = getattr(unreal, 'K2Node', None)
+            comment_cls = getattr(unreal, 'EdGraphNode_Comment', None)
+            listed = _invoke_out_array(editor, 'list_all_nodes', k2_cls)
+            comments = _invoke_out_array(editor, 'list_comment_nodes', comment_cls)
+            info['list_all_nodes'] = len(listed)
+            info['list_comment_nodes'] = len(comments)
+            nodes.extend(listed)
+            nodes.extend(comments)
+    info['sample'] = [_class_name(node) for node in nodes[:8]]
     return _unique_nodes(nodes), info
 
 
@@ -2192,25 +3236,8 @@ def _collect_graph_nodes(blueprint, graph, probe):
             probe['used'] = info
             probe['attempts'] = attempts
             return nodes
-    iterator = getattr(unreal, 'ObjectIterator', None)
-    ed_node = getattr(unreal, 'EdGraphNode', None)
-    if iterator is not None and ed_node is not None and graph is not None:
-        extras = []
-        try:
-            graph_path = graph.get_path_name()
-            for obj in iterator(ed_node):
-                try:
-                    outer = obj.get_outer()
-                    if outer is not None and outer.get_path_name() == graph_path:
-                        extras.append(obj)
-                except Exception:
-                    continue
-        except Exception as error:
-            probe['object_iterator_error'] = str(error)
-        if extras:
-            probe['object_iterator'] = len(extras)
-            probe['attempts'] = attempts
-            return _unique_nodes(extras)
+    # Never scan every EdGraphNode in the process: that AV'd UE 5.8 on
+    # LevelButton (Export Project died at "collecting LevelButton").
     probe['attempts'] = attempts
     return []
 
@@ -2332,6 +3359,18 @@ def _list_graph_names(blueprint):
             seen.add(text)
             names.append(text)
     return names
+
+
+def _load_any_asset(path):
+    if unreal is None or not path:
+        return None
+    obj = unreal.load_asset(path)
+    if obj is None:
+        try:
+            obj = unreal.EditorAssetLibrary.load_asset(path)
+        except Exception:
+            obj = None
+    return obj
 
 
 def _load_blueprint(path):
@@ -2625,8 +3664,8 @@ def _python_toolbar_command(call_expr):
         'p = os.path.normpath(unreal.Paths.project_content_dir() + "Python/editor"); '
         'sys.path.remove(p) if p in sys.path else None; '
         'sys.path.insert(0, p); '
-        'import export_blueprint_graph as _mw_bg; '
-        '_mw_bg = importlib.reload(_mw_bg); '
+        'import bp2mermaid as _bp; '
+        '_bp = importlib.reload(_bp); '
         + call_expr
     )
 
@@ -2651,7 +3690,7 @@ def _hooks():
 
 
 def _live_mod():
-    return sys.modules.get('export_blueprint_graph') or sys.modules.get(__name__)
+    return sys.modules.get('bp2mermaid') or sys.modules.get(__name__)
 
 
 def _ue_text(text):
@@ -2684,13 +3723,33 @@ def _handle_asset_updated_on_disk(*args):
     if not is_auto_export_enabled():
         return
     asset_data = args[0] if args else None
-    blueprint = _blueprint_from_asset_data(asset_data)
+    asset = _asset_from_asset_data(asset_data)
+    name = ''
+    if asset is not None:
+        getter = getattr(asset, 'get_name', None)
+        if callable(getter):
+            try:
+                name = getter()
+            except Exception:
+                name = ''
+    if not name and asset_data is not None:
+        name = str(getattr(asset_data, 'asset_name', '') or '')
+        if not name:
+            package_name = getattr(asset_data, 'package_name', None)
+            if package_name:
+                name = str(package_name)
+    if is_data_asset_export_name(name):
+        if asset is None:
+            return
+        auto_export_data_asset(asset)
+        return
+    blueprint = _as_blueprint(asset)
     if blueprint is None:
         return
     auto_export_blueprint(blueprint)
 
 
-def _blueprint_from_asset_data(asset_data):
+def _asset_from_asset_data(asset_data):
     if asset_data is None:
         return None
     asset = None
@@ -2703,8 +3762,12 @@ def _blueprint_from_asset_data(asset_data):
     if asset is None:
         package_name = getattr(asset_data, 'package_name', None)
         if package_name:
-            asset = _load_blueprint(str(package_name))
-    return _as_blueprint(asset)
+            asset = _load_any_asset(str(package_name))
+    return asset
+
+
+def _blueprint_from_asset_data(asset_data):
+    return _as_blueprint(_asset_from_asset_data(asset_data))
 
 
 def _as_blueprint(obj):
@@ -2748,6 +3811,13 @@ def _dirty_package_names():
 
 def _auto_export_package_path(package_path):
     name = package_path.rsplit('/', 1)[-1]
+    if is_data_asset_export_name(name):
+        obj = _load_any_asset(package_path)
+        if obj is None:
+            obj = _load_any_asset('{}.{}'.format(package_path, name))
+        if obj is None:
+            return None
+        return auto_export_data_asset(obj)
     blueprint = _load_blueprint(package_path)
     if blueprint is None:
         blueprint = _load_blueprint('{}.{}'.format(package_path, name))
@@ -2804,7 +3874,7 @@ def _try_bind_asset_registry():
             continue
         adder(callback)
         hooks['registry_bound'] = True
-        _log('MW Export Graph: auto-export listening on AssetRegistry.{}'.format(attr))
+        _log('bp2mermaid: auto-export listening on AssetRegistry.{}'.format(attr))
         return True
     return False
 
@@ -2815,7 +3885,7 @@ def _start_dirty_poll():
         return
     register = getattr(unreal, 'register_slate_post_tick_callback', None)
     if register is None:
-        _log_error('MW Export Graph: no AssetRegistry save delegate and no slate tick callback')
+        _log_error('bp2mermaid: no AssetRegistry save delegate and no slate tick callback')
         return
     hooks['dirty_names'] = _dirty_package_names()
     hooks['next_poll'] = time.time()
@@ -2827,7 +3897,7 @@ def _start_dirty_poll():
 
     hooks['poll'] = tick
     hooks['tick_handle'] = register(tick)
-    _log('MW Export Graph: auto-export watching dirty packages (slate tick)')
+    _log('bp2mermaid: auto-export watching dirty packages (slate tick)')
 
 
 def _stop_dirty_poll():
@@ -2867,7 +3937,7 @@ def _ensure_save_watch():
 def _configure_toggle_script(script, menu):
     menu_name = getattr(menu, 'menu_name', None) or unreal.Name('')
     script.init_entry(
-        unreal.Name('MWExportGraph'),
+        unreal.Name('Bp2Mermaid'),
         menu_name,
         unreal.Name('Graphs'),
         unreal.Name('EnableAutoExport'),
@@ -2921,8 +3991,8 @@ def _add_export_project_entry(menu):
         menu,
         'ExportProject',
         'Export {}'.format(name),
-        'Export every /Game Blueprint into the Content-mirrored markdown tree (skip unchanged)',
-        '_mw_bg.export_project()',
+        'Export every /Game Blueprint plus GA_/GE_/DA_ assets into the Content-mirrored markdown tree (skip unchanged)',
+        '_bp.export_project()',
     )
 
 
@@ -2933,8 +4003,8 @@ def _add_auto_export_toggle(menu):
         menu.add_menu_entry('Graphs', sep)
     hooks = _hooks()
     toggle = hooks.get('toggle')
-    if toggle is None or type(toggle).__name__ != 'MWAutoExportToggle':
-        toggle = MWAutoExportToggle()
+    if toggle is None or type(toggle).__name__ != 'Bp2MermaidAutoExportToggle':
+        toggle = Bp2MermaidAutoExportToggle()
         hooks['toggle'] = toggle
         _RETAIN.append(toggle)
     _configure_toggle_script(toggle, menu)
@@ -2942,7 +4012,7 @@ def _add_auto_export_toggle(menu):
         menu.add_menu_entry_object(toggle)
         return
     except Exception as error:
-        _log_error('MW Export Graph: failed to add auto-export checkbox: {}'.format(error))
+        _log_error('bp2mermaid: failed to add auto-export checkbox: {}'.format(error))
     entry = unreal.ToolMenuEntry(
         name='EnableAutoExport',
         type=unreal.MultiBlockType.MENU_ENTRY,
@@ -2953,7 +4023,7 @@ def _add_auto_export_toggle(menu):
     entry.set_string_command(
         unreal.ToolMenuStringCommandType.PYTHON,
         unreal.Name(''),
-        _python_toolbar_command('_mw_bg.toggle_auto_export()'),
+        _python_toolbar_command('_bp.toggle_auto_export()'),
     )
     menu.add_menu_entry('Graphs', entry)
 
@@ -2965,18 +4035,18 @@ def register_menu():
     try:
         _register_menu_impl()
         _ensure_save_watch()
-        _log('MW Export Graph for LLM: registered on Blueprint Editor toolbar ({})'.format(__file__))
+        _log('bp2mermaid: registered on Blueprint Editor toolbar ({})'.format(__file__))
         return True
     except Exception as error:
-        _log_error('MW Export Graph for LLM: register_menu failed: {}'.format(error))
+        _log_error('bp2mermaid: register_menu failed: {}'.format(error))
         return False
 
 
 def _register_menu_impl():
     menus = unreal.ToolMenus.get()
     toolbar_name = 'AssetEditor.BlueprintEditor.ToolBar'
-    entry_name = 'MWExportGraphForLLM'
-    section_name = 'MWExportGraphForLLM'
+    entry_name = 'Bp2MermaidExport'
+    section_name = 'Bp2MermaidExport'
     submenu_name = toolbar_name + '.' + entry_name
 
     toolbar = menus.extend_menu(toolbar_name)
@@ -2991,7 +4061,7 @@ def _register_menu_impl():
     submenu = menus.register_menu(submenu_name, '', unreal.MultiBoxType.MENU, False)
     if submenu is None:
         submenu = menus.extend_menu(submenu_name)
-    section_object = MWExportGraphSection()
+    section_object = Bp2MermaidSection()
     _RETAIN.append(section_object)
     submenu.add_dynamic_section('Graphs', section_object)
     menus.refresh_all_widgets()
@@ -2999,7 +4069,7 @@ def _register_menu_impl():
 
 if unreal is not None:
     @unreal.uclass()
-    class MWExportGraphSection(unreal.ToolMenuSectionDynamic):
+    class Bp2MermaidSection(unreal.ToolMenuSectionDynamic):
         @unreal.ufunction(override=True)
         def construct_sections(self, menu, context):
             menu.add_section('Graphs', 'Graphs')
@@ -3010,17 +4080,17 @@ if unreal is not None:
                     'ExportAll',
                     'Export {}'.format(blueprint.get_name()),
                     'Export every graph of this Blueprint into the Content-mirrored markdown tree',
-                    '_mw_bg.export_all_by_path({!r})'.format(blueprint.get_path_name()),
+                    '_bp.export_all_by_path({!r})'.format(blueprint.get_path_name()),
                 )
             _add_export_project_entry(menu)
             _add_auto_export_toggle(menu)
 
     @unreal.uclass()
-    class MWAutoExportToggle(unreal.ToolMenuEntryScript):
+    class Bp2MermaidAutoExportToggle(unreal.ToolMenuEntryScript):
         @unreal.ufunction(override=True)
         def execute(self, context):
             enabled = toggle_auto_export()
-            _log('MW Export Graph: auto-export {}'.format('ON' if enabled else 'OFF'))
+            _log('bp2mermaid: auto-export {}'.format('ON' if enabled else 'OFF'))
 
         @unreal.ufunction(override=True)
         def get_check_state(self, context):
@@ -3029,7 +4099,7 @@ if unreal is not None:
 
 if __name__ == '__main__':
     if unreal is None:
-        raise SystemExit('Run this script inside Unreal Editor (py export_blueprint_graph.py)')
+        raise SystemExit('Run this script inside Unreal Editor (py bp2mermaid.py)')
     register_menu()
     report = run_editor_selftest(notify=False)
     unreal.log('Export Graph selftest report: {}'.format(report.get('report_path')))
