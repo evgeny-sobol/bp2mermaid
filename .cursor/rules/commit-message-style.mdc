@@ -1,0 +1,24 @@
+---
+description: Git commit messages — one-line when small, subject plus * bullets when not
+alwaysApply: true
+---
+
+# Commit message style
+
+When writing a git commit message (or a comment for staged changes), use this style. Prefer English. Imperative mood.
+
+If the change is small (one concern, a few files, no extra context needed), use **only a single subject line**. Do not add a body.
+
+If there are several distinct changes or the why/how is not obvious from the subject, use a subject line, a blank line, then `*` bullets. Each bullet starts with a verb and names what was added, changed, or removed.
+
+```
+Add hall handrail sabotage trap with occupancy hold and need-point disable
+
+* Add AttractDevice_HallHandrails, Handrails_Explosive / Exp_Handrails, empty attract emitter, and playground placement
+* Add TriggerCollisionHoldSeconds: occupancy is sampled with OverlapBox so leaving the volume resets the timer (handrails hold 7s)
+* Disable NeedSatisfactionPoint on fire, treat disabled points as not alive, and skip dead queue targets
+```
+
+- Subject: one sentence, no trailing period, summarizes the whole commit.
+- Bullets: one per distinct change; keep them concrete (names, numbers, behavior), not a file list.
+- Do not pad a one-line commit with empty bullets or a restatement of the subject.
